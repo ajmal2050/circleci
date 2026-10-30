@@ -1,8 +1,10 @@
 {
-  "name": "simple-fullstack-app",
+  "name": "circleci-demo-app",
   "version": "1.0.0",
+  "main": "backend/server.js",
   "scripts": {
     "start": "node backend/server.js",
+    "test": "node --test test/backend.test.js test/frontend.test.js",
     "test:backend": "node --test --test-reporter=junit test/backend.test.js",
     "test:frontend": "node --test --test-reporter=junit test/frontend.test.js"
   },
