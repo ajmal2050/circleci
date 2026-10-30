@@ -1,0 +1,15 @@
+{
+  "name": "simple-fullstack-app",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node backend/server.js",
+    "test:backend": "node --test --test-reporter=junit test/backend.test.js",
+    "test:frontend": "node --test --test-reporter=junit test/frontend.test.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  }
+}

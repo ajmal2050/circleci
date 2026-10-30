@@ -1,0 +1,102 @@
+version: 2.1
+
+executors:
+  node-env:
+    docker:
+      - image: cimg/node:20.12.0
+    working_directory: ~/project
+
+jobs:
+  install-dependencies:
+    executor: node-env
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - npm-deps-{{ checksum "package.json" }}
+            - npm-deps-
+      - run:
+          name: Install dependencies
+          command: npm install
+      - save_cache:
+          paths:
+            - node_modules
+          key: npm-deps-{{ checksum "package.json" }}
+      - persist_to_workspace:
+          root: ~/project
+          paths:
+            - .
+
+  # Job: Backend Tests with JUnit XML reporting
+  test-backend:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Create Results Directory
+          command: mkdir -p test-results/backend
+      - run:
+          name: Run Backend Tests
+          command: npm run test:backend > test-results/backend/results.xml
+      # Native CircleCI test parser
+      - store_test_results:
+          path: test-results
+      # Also store raw file as artifact for direct download if needed
+      - store_artifacts:
+          path: test-results/backend
+          destination: backend-xml
+
+  # Job: Frontend Tests with JUnit XML reporting
+  test-frontend:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Create Results Directory
+          command: mkdir -p test-results/frontend
+      - run:
+          name: Run Frontend Tests
+          command: npm run test:frontend > test-results/frontend/results.xml
+      # Native CircleCI test parser
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results/frontend
+          destination: frontend-xml
+
+  deploy:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Production Release
+          command: echo "All test XML suites confirmed passing. Deploying..."
+
+workflows:
+  version: 2
+  ci-cd-pipeline:
+    jobs:
+      - install-dependencies
+      - test-backend:
+          requires:
+            - install-dependencies
+      - test-frontend:
+          requires:
+            - install-dependencies
+      - hold-deploy:
+          type: approval
+          requires:
+            - test-backend
+            - test-frontend
+          filters:
+            branches:
+              only: main
+      - deploy:
+          requires:
+            - hold-deploy
+          filters:
+            branches:
+              only: main
