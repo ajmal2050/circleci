@@ -33,11 +33,11 @@ jobs:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Create Results Directory
+          name: Prepare results folder
           command: mkdir -p test-results/backend
       - run:
           name: Run Backend Tests
-          command: npm run test:backend > test-results/backend/results.xml
+          command: npm run test:backend
       - store_test_results:
           path: test-results
       - store_artifacts:
@@ -50,11 +50,11 @@ jobs:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Create Results Directory
+          name: Prepare results folder
           command: mkdir -p test-results/frontend
       - run:
           name: Run Frontend Tests
-          command: npm run test:frontend > test-results/frontend/results.xml
+          command: npm run test:frontend
       - store_test_results:
           path: test-results
       - store_artifacts:

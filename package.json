@@ -5,8 +5,8 @@
   "scripts": {
     "start": "node backend/server.js",
     "test": "node --test test/backend.test.js test/frontend.test.js",
-    "test:backend": "node --test --test-reporter=junit test/backend.test.js",
-    "test:frontend": "node --test --test-reporter=junit test/frontend.test.js"
+    "test:backend": "node --test --test-reporter=junit --test-reporter-destination=test-results/backend/results.xml test/backend.test.js",
+    "test:frontend": "node --test --test-reporter=junit --test-reporter-destination=test-results/frontend/results.xml test/frontend.test.js"
   },
   "dependencies": {
     "express": "^4.19.2"
