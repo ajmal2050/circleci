@@ -29,31 +29,79 @@ jobs:
           paths:
             - .
 
-  run-tests-parallel:
+  # Block 1
+  test-backend:
     executor: node-env
-    parallelism: 4 # Provisions 4 containers running at the same time
     steps:
       - attach_workspace:
           at: ~/project
       - run:
           name: Prepare results directory
-          command: mkdir -p test-results/junit
+          command: mkdir -p test-results/backend
       - run:
-          name: Run Split Tests Across 4 Parallel Nodes
-          command: |
-            # Automatically discovers all 4 test files and maps 1 file to each node
-            TEST_FILES=$(circleci tests glob "test/**/*.test.js" | circleci tests split --split-by=timings)
-            echo "========================================================"
-            echo "Node $CIRCLE_NODE_INDEX of $CIRCLE_NODE_TOTAL is running:"
-            echo "$TEST_FILES"
-            echo "========================================================"
-            npm run test:parallel -- --test-reporter-destination="test-results/junit/results-${CIRCLE_NODE_INDEX}.xml" $TEST_FILES
+          name: Run Backend Test Suite
+          command: npm run test:backend
       - store_test_results:
           path: test-results
       - store_artifacts:
-          path: test-results/junit
-          destination: parallel-test-results
+          path: test-results/backend
+          destination: backend-reports
 
+  # Block 2
+  test-frontend:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Prepare results directory
+          command: mkdir -p test-results/frontend
+      - run:
+          name: Run Frontend Test Suite
+          command: npm run test:frontend
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results/frontend
+          destination: frontend-reports
+
+  # Block 3
+  test-frontend-dom:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Prepare results directory
+          command: mkdir -p test-results/frontend-dom
+      - run:
+          name: Run Frontend DOM Test Suite
+          command: npm run test:frontend-dom
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results/frontend-dom
+          destination: frontend-dom-reports
+
+  # Block 4
+  test-extra:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Prepare results directory
+          command: mkdir -p test-results/extra
+      - run:
+          name: Run Extra Test Suite
+          command: npm run test:extra
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results/extra
+          destination: extra-reports
+
+  # Deploy Block
   deploy:
     executor: node-env
     steps:
@@ -62,7 +110,7 @@ jobs:
       - run:
           name: Execute Production Deploy
           command: |
-            echo "All 4 parallel test nodes passed successfully!"
+            echo "All 4 test suites passed successfully!"
             echo "Deploying application to production..."
 
 workflows:
@@ -70,9 +118,25 @@ workflows:
   build-test-and-deploy:
     jobs:
       - install-dependencies
-      - run-tests-parallel:
+
+      # All 4 test blocks execute in parallel
+      - test-backend:
           requires:
             - install-dependencies
+      - test-frontend:
+          requires:
+            - install-dependencies
+      - test-frontend-dom:
+          requires:
+            - install-dependencies
+      - test-extra:
+          requires:
+            - install-dependencies
+
+      # Deploy waits until all 4 test blocks are green
       - deploy:
           requires:
-            - run-tests-parallel
+            - test-backend
+            - test-frontend
+            - test-frontend-dom
+            - test-extra

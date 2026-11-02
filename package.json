@@ -3,22 +3,12 @@
   "version": "1.0.0",
   "main": "backend/server.js",
   "scripts": {
-   
     "start": "node backend/server.js",
-
-    
-    "test": "node --test test/*.test.js",
-
-    "test:backend:unit": "node --test --test-reporter=junit --test-reporter-destination=test-results/backend-unit/results.xml test/backend-unit.test.js",
-
- 
-    "test:backend:integration": "node --test --test-reporter=junit --test-reporter-destination=test-results/backend-integration/results.xml test/backend-integration.test.js",
-
-  
-    "test:frontend:dom": "node --test --test-reporter=junit --test-reporter-destination=test-results/frontend-dom/results.xml test/frontend-dom.test.js",
-
-    
-    "test:frontend:state": "node --test --test-reporter=junit --test-reporter-destination=test-results/frontend-state/results.xml test/frontend-state.test.js"
+    "test": "node --test test/**/*.test.js",
+    "test:backend": "node --test --test-reporter=junit --test-reporter-destination=test-results/backend/results.xml test/backend.test.js",
+    "test:frontend": "node --test --test-reporter=junit --test-reporter-destination=test-results/frontend/results.xml test/frontend.test.js",
+    "test:frontend-dom": "node --test --test-reporter=junit --test-reporter-destination=test-results/frontend-dom/results.xml test/frontend-dom.test.js",
+    "test:extra": "node --test --test-reporter=junit --test-reporter-destination=test-results/extra/results.xml test/integration.test.js"
   },
   "dependencies": {
     "express": "^4.19.2"
