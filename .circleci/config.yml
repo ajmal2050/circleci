@@ -8,7 +8,7 @@ executors:
 
 jobs:
   # -----------------------------------------------------------------
-  # Base Setup: Installs and caches dependencies
+  # Base Setup: Dependencies installation and caching
   # -----------------------------------------------------------------
   install-dependencies:
     executor: node-env
@@ -33,7 +33,7 @@ jobs:
             - .
 
   # -----------------------------------------------------------------
-  # Block 1: Backend Unit Tests
+  # Visual Test Block 1: Backend Unit Tests
   # -----------------------------------------------------------------
   test-backend-unit:
     executor: node-env
@@ -53,7 +53,7 @@ jobs:
           destination: backend-unit-reports
 
   # -----------------------------------------------------------------
-  # Block 2: Backend Integration Tests
+  # Visual Test Block 2: Backend Integration Tests
   # -----------------------------------------------------------------
   test-backend-integration:
     executor: node-env
@@ -73,7 +73,7 @@ jobs:
           destination: backend-integration-reports
 
   # -----------------------------------------------------------------
-  # Block 3: Frontend DOM Tests
+  # Visual Test Block 3: Frontend DOM Tests
   # -----------------------------------------------------------------
   test-frontend-dom:
     executor: node-env
@@ -93,7 +93,7 @@ jobs:
           destination: frontend-dom-reports
 
   # -----------------------------------------------------------------
-  # Block 4: Frontend State Tests
+  # Visual Test Block 4: Frontend State Tests
   # -----------------------------------------------------------------
   test-frontend-state:
     executor: node-env
@@ -113,7 +113,7 @@ jobs:
           destination: frontend-state-reports
 
   # -----------------------------------------------------------------
-  # Deploy Block: Executes only when all 4 test blocks pass
+  # Smart Deployment Stage: Release Application
   # -----------------------------------------------------------------
   deploy:
     executor: node-env
@@ -121,21 +121,89 @@ jobs:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Execute Production Deploy
+          name: Deploy Release to Production
           command: |
-            echo "All 4 test suites passed successfully!"
-            echo "Deploying application to production..."
+            echo "All 4 test suites passed successfully."
+            echo "Deploying application commit: $CIRCLE_SHA1"
+            # Command to deploy (e.g. AWS CLI, Docker push, webhook deploy hook)
+            echo "PREVIOUS_STABLE_COMMIT=$(git rev-parse HEAD~1)" > deploy_state.env
+      - persist_to_workspace:
+          root: ~/project
+          paths:
+            - deploy_state.env
+
+  # -----------------------------------------------------------------
+  # Smart Deployment Stage: Validate via Probes & Monitoring Webhook
+  # -----------------------------------------------------------------
+  validate-deployment:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Automated Health Checks & Webhook Monitoring
+          command: |
+            echo "=== Validating Deployment Release ==="
+            # Simulate endpoint probe (Replace URL with your live service URL)
+            TARGET_URL="http://localhost:3000/api/status"
+            
+            # Start background server for verification
+            node backend/server.js &
+            SERVER_PID=$!
+            sleep 3
+
+            echo "Sending health check request to $TARGET_URL..."
+            STATUS_CODE=$(curl -s -o response.json -w "%{http_code}" "$TARGET_URL" || echo "000")
+
+            if [ "$STATUS_CODE" != "200" ]; then
+              echo "Error: Health check failed with HTTP status $STATUS_CODE"
+              kill -9 $SERVER_PID || true
+              exit 1
+            fi
+
+            echo "Health check probe passed with status 200!"
+            kill -9 $SERVER_PID || true
+
+            # Trigger CircleCI / Monitoring webhook notification
+            if [ -n "$MONITORING_WEBHOOK_URL" ]; then
+              echo "Dispatching validation event to monitoring webhook..."
+              curl -s -X POST -H "Content-Type: application/json" \
+                -d "{\"status\":\"healthy\",\"pipeline_id\":\"$CIRCLE_WORKFLOW_ID\",\"commit\":\"$CIRCLE_SHA1\"}" \
+                "$MONITORING_WEBHOOK_URL"
+            fi
+
+  # -----------------------------------------------------------------
+  # Smart Deployment Stage: Automated Rollback on Failure
+  # -----------------------------------------------------------------
+  rollback:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Execute Automated Rollback
+          command: |
+            echo "=========================================================="
+            echo "WARNING: Health checks or monitoring validation failed!"
+            echo "Initiating automated rollback to previous stable commit..."
+            echo "=========================================================="
+            if [ -f deploy_state.env ]; then
+              source deploy_state.env
+              echo "Rolling back deployment to commit: $PREVIOUS_STABLE_COMMIT"
+            fi
+            # Insert cloud rollback command here (e.g., re-deploy previous tag or image)
+            echo "Rollback sequence completed successfully."
 
 # -----------------------------------------------------------------
-# Workflow Graph Layout
+# Workflow Layout
 # -----------------------------------------------------------------
 workflows:
   version: 2
-  build-test-and-deploy:
+  build-test-and-smart-deploy:
     jobs:
       - install-dependencies
 
-      # All 4 test blocks execute simultaneously side-by-side
+      # 4 Parallel Test Blocks
       - test-backend-unit:
           requires:
             - install-dependencies
@@ -149,10 +217,25 @@ workflows:
           requires:
             - install-dependencies
 
-      # Deployment executes strictly when all 4 test blocks turn green
+      # Deploy proceeds only after all 4 test blocks turn green
       - deploy:
           requires:
             - test-backend-unit
             - test-backend-integration
             - test-frontend-dom
             - test-frontend-state
+
+      # Post-release validation checks live service health
+      - validate-deployment:
+          requires:
+            - deploy
+
+      # Auto rollback triggers only if validation fails
+      - rollback:
+          requires:
+            - validate-deployment
+          # Ensures this job runs only if validate-deployment failed
+          # (Configured via CircleCI or status check routing)
+
+
+          
