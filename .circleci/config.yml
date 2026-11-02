@@ -1,6 +1,5 @@
 version: 2.1
 
-# Reusable executor configuration
 executors:
   node-env:
     docker:
@@ -9,7 +8,7 @@ executors:
 
 jobs:
   # -------------------------------------------------------------
-  # Job 1: Setup & Dependency Cache
+  # Job 1: Install & Cache Dependencies
   # -------------------------------------------------------------
   install-dependencies:
     executor: node-env
@@ -113,15 +112,44 @@ jobs:
           path: test-results/frontend-state
           destination: frontend-state-reports
 
+  # -------------------------------------------------------------
+  # Job 6: Notification / Status Aggregator (Runs after all 4 pass)
+  # -------------------------------------------------------------
+  notify-tests-passed:
+    executor: node-env
+    steps:
+      - run:
+          name: Broadcast Success Status
+          command: |
+            echo "======================================================="
+            echo "All 4 test suites passed successfully!"
+            echo "Backend Unit, Backend Integration, Frontend DOM, and Frontend State are green."
+            echo "Ready for production release."
+            echo "======================================================="
+
+  # -------------------------------------------------------------
+  # Job 7: Production Deployment
+  # -------------------------------------------------------------
+  deploy-production:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Execute Deployment Scripts
+          command: |
+            echo "Deploying fullstack application to production environment..."
+
 # =============================================================
-# WORKFLOW: Displays 4 parallel branches in the UI DAG diagram
+# WORKFLOW ORCHESTRATION
 # =============================================================
 workflows:
   version: 2
   fullstack-4-parallel-tests:
     jobs:
       - install-dependencies
-      # All 4 tests depend ONLY on install-dependencies, triggering simultaneously
+
+      # --- 4 PARALLEL TEST SUITES ---
       - test-backend-unit:
           requires:
             - install-dependencies
@@ -134,3 +162,28 @@ workflows:
       - test-frontend-state:
           requires:
             - install-dependencies
+
+      # --- FAN-IN NOTIFICATION (Waits for all 4 tests) ---
+      - notify-tests-passed:
+          requires:
+            - test-backend-unit
+            - test-backend-integration
+            - test-frontend-dom
+            - test-frontend-state
+
+      # --- MANUAL APPROVAL GATE ---
+      - hold-production-deploy:
+          type: approval
+          requires:
+            - notify-tests-passed
+          filters:
+            branches:
+              only: main
+
+      # --- PRODUCTION DEPLOYMENT ---
+      - deploy-production:
+          requires:
+            - hold-production-deploy
+          filters:
+            branches:
+              only: main
