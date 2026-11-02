@@ -1,105 +1,136 @@
 version: 2.1
 
-# Define reusable execution environments
+# Reusable executor configuration
 executors:
   node-env:
     docker:
-      # Official CircleCI Node.js Docker convenience image
       - image: cimg/node:20.12.0
-    # Base working directory inside each container
     working_directory: ~/project
 
 jobs:
   # -------------------------------------------------------------
-  # Job 1: Install Dependencies (Runs on 1 container)
+  # Job 1: Setup & Dependency Cache
   # -------------------------------------------------------------
   install-dependencies:
     executor: node-env
     steps:
-      # Pull down code from the git repository
       - checkout
-
-      # Restore cached node_modules if package.json has not changed
       - restore_cache:
-          name: Restore cached node_modules
+          name: Restore npm dependencies cache
           keys:
             - npm-deps-{{ checksum "package.json" }}
             - npm-deps-
-
-      # Install all dependencies defined in package.json
       - run:
           name: Install npm packages
           command: npm install
-
-      # Save node_modules into the CircleCI cache for subsequent builds
       - save_cache:
-          name: Save node_modules to cache
+          name: Cache npm dependencies
           paths:
             - node_modules
           key: npm-deps-{{ checksum "package.json" }}
-
-      # Persist the entire workspace so downstream parallel jobs have access to code & modules
       - persist_to_workspace:
           root: ~/project
           paths:
             - .
 
   # -------------------------------------------------------------
-  # Job 2: Run Tests with Container Parallelism (Runs on 2 containers)
+  # Parallel Test 1: Backend Unit Tests
   # -------------------------------------------------------------
-  run-tests-parallel:
+  test-backend-unit:
     executor: node-env
-    # Instructs CircleCI to launch 2 identical containers concurrently
-    parallelism: 2
     steps:
-      # Attach the workspace containing the source code and cached node_modules
       - attach_workspace:
           at: ~/project
-
-      # Ensure a clean results folder exists inside each container
       - run:
-          name: Prepare results directory
-          command: mkdir -p test-results/junit
-
-      # Split test files dynamically across both nodes using CircleCI's native CLI
+          name: Prepare results folder
+          command: mkdir -p test-results/backend-unit
       - run:
-          name: Split and execute test suite across nodes
-          command: |
-            # 1. 'circleci tests glob' discovers all files ending in .test.js
-            # 2. 'circleci tests split --split-by=timings' balances files across Node 0 and Node 1
-            TEST_FILES=$(circleci tests glob "test/**/*.test.js" | circleci tests split --split-by=timings)
-
-            # Print node index and assigned files for debugging in the UI console
-            echo "========================================================"
-            echo "Running Node Index: $CIRCLE_NODE_INDEX of Total: $CIRCLE_NODE_TOTAL"
-            echo "Test files allocated to this container:"
-            echo "$TEST_FILES"
-            echo "========================================================"
-
-            # 3. Run only the tests assigned to this specific node
-            # Save results into a distinct XML filename based on CIRCLE_NODE_INDEX
-            npm run test:parallel -- --test-reporter-destination="test-results/junit/results-${CIRCLE_NODE_INDEX}.xml" $TEST_FILES
-
-      # CircleCI ingests the XML reports from both containers and merges them in the "Tests" UI tab
+          name: Run Backend Unit Tests
+          command: npm run test:backend:unit
       - store_test_results:
           path: test-results
-
-      # Store each node's raw XML file in the Artifacts tab for manual inspection
       - store_artifacts:
-          path: test-results/junit
-          destination: parallel-test-results
+          path: test-results/backend-unit
+          destination: backend-unit-reports
 
-# -------------------------------------------------------------
-# Workflow Definition
-# -------------------------------------------------------------
+  # -------------------------------------------------------------
+  # Parallel Test 2: Backend Integration Tests
+  # -------------------------------------------------------------
+  test-backend-integration:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Prepare results folder
+          command: mkdir -p test-results/backend-integration
+      - run:
+          name: Run Backend Integration Tests
+          command: npm run test:backend:integration
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results/backend-integration
+          destination: backend-integration-reports
+
+  # -------------------------------------------------------------
+  # Parallel Test 3: Frontend DOM Tests
+  # -------------------------------------------------------------
+  test-frontend-dom:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Prepare results folder
+          command: mkdir -p test-results/frontend-dom
+      - run:
+          name: Run Frontend DOM Tests
+          command: npm run test:frontend:dom
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results/frontend-dom
+          destination: frontend-dom-reports
+
+  # -------------------------------------------------------------
+  # Parallel Test 4: Frontend State Tests
+  # -------------------------------------------------------------
+  test-frontend-state:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Prepare results folder
+          command: mkdir -p test-results/frontend-state
+      - run:
+          name: Run Frontend State Tests
+          command: npm run test:frontend:state
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results/frontend-state
+          destination: frontend-state-reports
+
+# =============================================================
+# WORKFLOW: Displays 4 parallel branches in the UI DAG diagram
+# =============================================================
 workflows:
   version: 2
-  build-and-test:
+  fullstack-4-parallel-tests:
     jobs:
-      # Step 1: Install dependencies first
       - install-dependencies
-
-      # Step 2: Trigger the 2 parallel testing containers once installation completes
-      - run-tests-parallel:
+      # All 4 tests depend ONLY on install-dependencies, triggering simultaneously
+      - test-backend-unit:
+          requires:
+            - install-dependencies
+      - test-backend-integration:
+          requires:
+            - install-dependencies
+      - test-frontend-dom:
+          requires:
+            - install-dependencies
+      - test-frontend-state:
           requires:
             - install-dependencies
