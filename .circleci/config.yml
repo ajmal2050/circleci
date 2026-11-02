@@ -86,17 +86,10 @@ workflows:
       - test-frontend:
           requires:
             - install-dependencies
-      - hold-deploy:
-          type: approval
+      - deploy:
           requires:
             - test-backend
             - test-frontend
-          filters:
-            branches:
-              only: main
-      - deploy:
-          requires:
-            - hold-deploy
           filters:
             branches:
               only: main
