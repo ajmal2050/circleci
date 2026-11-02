@@ -33,7 +33,7 @@ jobs:
             - .
 
   # -----------------------------------------------------------------
-  # Visual Test Block 1: Backend Unit Tests
+  # 4 Visual Parallel Test Blocks
   # -----------------------------------------------------------------
   test-backend-unit:
     executor: node-env
@@ -52,9 +52,6 @@ jobs:
           path: test-results/backend-unit
           destination: backend-unit-reports
 
-  # -----------------------------------------------------------------
-  # Visual Test Block 2: Backend Integration Tests
-  # -----------------------------------------------------------------
   test-backend-integration:
     executor: node-env
     steps:
@@ -72,9 +69,6 @@ jobs:
           path: test-results/backend-integration
           destination: backend-integration-reports
 
-  # -----------------------------------------------------------------
-  # Visual Test Block 3: Frontend DOM Tests
-  # -----------------------------------------------------------------
   test-frontend-dom:
     executor: node-env
     steps:
@@ -92,9 +86,6 @@ jobs:
           path: test-results/frontend-dom
           destination: frontend-dom-reports
 
-  # -----------------------------------------------------------------
-  # Visual Test Block 4: Frontend State Tests
-  # -----------------------------------------------------------------
   test-frontend-state:
     executor: node-env
     steps:
@@ -113,7 +104,37 @@ jobs:
           destination: frontend-state-reports
 
   # -----------------------------------------------------------------
-  # Smart Deployment Stage: Release Application
+  # Step 1: Pre-Deploy Validation (Runs BEFORE Deploy)
+  # -----------------------------------------------------------------
+  pre-deploy-validation:
+    executor: node-env
+    steps:
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Validate Code Integrity and Configurations
+          command: |
+            echo "=== Step 1: Pre-Deployment Validation ==="
+            # 1. Verify build files exist
+            if [ ! -f "backend/server.js" ] || [ ! -d "frontend" ]; then
+              echo "Error: Required deployment files are missing!"
+              exit 1
+            fi
+
+            # 2. Dry-run server initialization check
+            node -e "require('./backend/server.js'); console.log('Server code parsed without syntax errors.'); process.exit(0);"
+
+            # 3. Save current release target version
+            echo "TARGET_RELEASE_COMMIT=$CIRCLE_SHA1" > release_metadata.env
+            echo "PREV_RELEASE_COMMIT=$(git rev-parse HEAD~1)" >> release_metadata.env
+            echo "Pre-deploy validation passed. Safe to deploy."
+      - persist_to_workspace:
+          root: ~/project
+          paths:
+            - release_metadata.env
+
+  # -----------------------------------------------------------------
+  # Step 2: Deployment
   # -----------------------------------------------------------------
   deploy:
     executor: node-env
@@ -121,89 +142,81 @@ jobs:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Deploy Release to Production
+          name: Execute Production Release
           command: |
-            echo "All 4 test suites passed successfully."
-            echo "Deploying application commit: $CIRCLE_SHA1"
-            # Command to deploy (e.g. AWS CLI, Docker push, webhook deploy hook)
-            echo "PREVIOUS_STABLE_COMMIT=$(git rev-parse HEAD~1)" > deploy_state.env
-      - persist_to_workspace:
-          root: ~/project
-          paths:
-            - deploy_state.env
+            echo "=== Step 2: Deploying Application ==="
+            if [ -f release_metadata.env ]; then
+              source release_metadata.env
+              echo "Releasing version commit: $TARGET_RELEASE_COMMIT"
+            fi
+            # Place deployment CLI commands here (Docker, Render webhook, SSH, AWS S3/EC2)
+            echo "Deployment execution finished successfully."
 
   # -----------------------------------------------------------------
-  # Smart Deployment Stage: Validate via Probes & Monitoring Webhook
+  # Step 3: Smart Deployment Monitoring & Conditional Rollback
   # -----------------------------------------------------------------
-  validate-deployment:
+  smart-deploy-monitor:
     executor: node-env
     steps:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Automated Health Checks & Webhook Monitoring
+          name: Active Monitoring Probes & Webhook Validation
           command: |
-            echo "=== Validating Deployment Release ==="
-            # Simulate endpoint probe (Replace URL with your live service URL)
-            TARGET_URL="http://localhost:3000/api/status"
+            echo "=== Step 3: Smart Deployment Monitoring ==="
             
-            # Start background server for verification
+            # Start background instance to probe live endpoint
             node backend/server.js &
-            SERVER_PID=$!
+            APP_PID=$!
             sleep 3
 
-            echo "Sending health check request to $TARGET_URL..."
-            STATUS_CODE=$(curl -s -o response.json -w "%{http_code}" "$TARGET_URL" || echo "000")
+            echo "Probing /api/status endpoint..."
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/status || echo "000")
+            echo "Received status: $HTTP_STATUS"
 
-            if [ "$STATUS_CODE" != "200" ]; then
-              echo "Error: Health check failed with HTTP status $STATUS_CODE"
-              kill -9 $SERVER_PID || true
+            if [ "$HTTP_STATUS" != "200" ]; then
+              echo "Monitoring Alert: Health check failed with status $HTTP_STATUS"
+              kill -9 $APP_PID || true
               exit 1
             fi
 
-            echo "Health check probe passed with status 200!"
-            kill -9 $SERVER_PID || true
+            kill -9 $APP_PID || true
+            echo "Health status verified: 200 OK."
 
-            # Trigger CircleCI / Monitoring webhook notification
+            # Post-deployment monitoring webhook trigger
             if [ -n "$MONITORING_WEBHOOK_URL" ]; then
-              echo "Dispatching validation event to monitoring webhook..."
+              echo "Sending deployment status event to monitoring webhook..."
               curl -s -X POST -H "Content-Type: application/json" \
-                -d "{\"status\":\"healthy\",\"pipeline_id\":\"$CIRCLE_WORKFLOW_ID\",\"commit\":\"$CIRCLE_SHA1\"}" \
+                -d "{\"event\":\"deployment_healthy\",\"commit\":\"$CIRCLE_SHA1\",\"pipeline_id\":\"$CIRCLE_WORKFLOW_ID\"}" \
                 "$MONITORING_WEBHOOK_URL"
+            else
+              echo "MONITORING_WEBHOOK_URL not set. Internal monitoring probes passed."
             fi
 
-  # -----------------------------------------------------------------
-  # Smart Deployment Stage: Automated Rollback on Failure
-  # -----------------------------------------------------------------
-  rollback:
-    executor: node-env
-    steps:
-      - attach_workspace:
-          at: ~/project
+      # Rollback runs ONLY IF monitoring checks fail
       - run:
-          name: Execute Automated Rollback
+          name: Automated Rollback on Monitoring Failure
+          when: on_fail
           command: |
             echo "=========================================================="
-            echo "WARNING: Health checks or monitoring validation failed!"
-            echo "Initiating automated rollback to previous stable commit..."
+            echo "ALERT: Monitoring checks failed! Triggering automatic rollback."
             echo "=========================================================="
-            if [ -f deploy_state.env ]; then
-              source deploy_state.env
-              echo "Rolling back deployment to commit: $PREVIOUS_STABLE_COMMIT"
+            if [ -f release_metadata.env ]; then
+              source release_metadata.env
+              echo "Reverting production traffic to previous stable commit: $PREV_RELEASE_COMMIT"
             fi
-            # Insert cloud rollback command here (e.g., re-deploy previous tag or image)
-            echo "Rollback sequence completed successfully."
+            echo "Rollback completed."
 
 # -----------------------------------------------------------------
-# Workflow Layout
+# Workflow Orchestration
 # -----------------------------------------------------------------
 workflows:
   version: 2
-  build-test-and-smart-deploy:
+  build-validate-deploy-and-monitor:
     jobs:
       - install-dependencies
 
-      # 4 Parallel Test Blocks
+      # 4 Tests run simultaneously side-by-side
       - test-backend-unit:
           requires:
             - install-dependencies
@@ -217,25 +230,20 @@ workflows:
           requires:
             - install-dependencies
 
-      # Deploy proceeds only after all 4 test blocks turn green
-      - deploy:
+      # 1. Validate First: Requires all 4 test blocks to pass
+      - pre-deploy-validation:
           requires:
             - test-backend-unit
             - test-backend-integration
             - test-frontend-dom
             - test-frontend-state
 
-      # Post-release validation checks live service health
-      - validate-deployment:
+      # 2. Deploy: Strictly waits for validation to pass
+      - deploy:
+          requires:
+            - pre-deploy-validation
+
+      # 3. Monitor in Smart Deployment: Runs after deploy
+      - smart-deploy-monitor:
           requires:
             - deploy
-
-      # Auto rollback triggers only if validation fails
-      - rollback:
-          requires:
-            - validate-deployment
-          # Ensures this job runs only if validate-deployment failed
-          # (Configured via CircleCI or status check routing)
-
-
-          
