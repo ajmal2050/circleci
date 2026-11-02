@@ -1,4 +1,4 @@
-frontend-dom.test.jsconst { describe, test } = require('node:test');
+const { describe, test } = require('node:test');
 const assert = require('node:assert');
 const { JSDOM } = require('jsdom');
 const { updateStatus } = require('../frontend/app');
