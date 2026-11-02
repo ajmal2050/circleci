@@ -7,6 +7,9 @@ executors:
     working_directory: ~/project
 
 jobs:
+  # -----------------------------------------------------------------
+  # Base Setup: Installs and caches dependencies
+  # -----------------------------------------------------------------
   install-dependencies:
     executor: node-env
     steps:
@@ -29,53 +32,59 @@ jobs:
           paths:
             - .
 
-  # Block 1
-  test-backend:
+  # -----------------------------------------------------------------
+  # Block 1: Backend Unit Tests
+  # -----------------------------------------------------------------
+  test-backend-unit:
     executor: node-env
     steps:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Prepare results directory
-          command: mkdir -p test-results/backend
+          name: Prepare results folder
+          command: mkdir -p test-results/backend-unit
       - run:
-          name: Run Backend Test Suite
-          command: npm run test:backend
+          name: Run Backend Unit Tests
+          command: npm run test:backend-unit
       - store_test_results:
           path: test-results
       - store_artifacts:
-          path: test-results/backend
-          destination: backend-reports
+          path: test-results/backend-unit
+          destination: backend-unit-reports
 
-  # Block 2
-  test-frontend:
+  # -----------------------------------------------------------------
+  # Block 2: Backend Integration Tests
+  # -----------------------------------------------------------------
+  test-backend-integration:
     executor: node-env
     steps:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Prepare results directory
-          command: mkdir -p test-results/frontend
+          name: Prepare results folder
+          command: mkdir -p test-results/backend-integration
       - run:
-          name: Run Frontend Test Suite
-          command: npm run test:frontend
+          name: Run Backend Integration Tests
+          command: npm run test:backend-integration
       - store_test_results:
           path: test-results
       - store_artifacts:
-          path: test-results/frontend
-          destination: frontend-reports
+          path: test-results/backend-integration
+          destination: backend-integration-reports
 
-  # Block 3
+  # -----------------------------------------------------------------
+  # Block 3: Frontend DOM Tests
+  # -----------------------------------------------------------------
   test-frontend-dom:
     executor: node-env
     steps:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Prepare results directory
+          name: Prepare results folder
           command: mkdir -p test-results/frontend-dom
       - run:
-          name: Run Frontend DOM Test Suite
+          name: Run Frontend DOM Tests
           command: npm run test:frontend-dom
       - store_test_results:
           path: test-results
@@ -83,25 +92,29 @@ jobs:
           path: test-results/frontend-dom
           destination: frontend-dom-reports
 
-  # Block 4
-  test-extra:
+  # -----------------------------------------------------------------
+  # Block 4: Frontend State Tests
+  # -----------------------------------------------------------------
+  test-frontend-state:
     executor: node-env
     steps:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Prepare results directory
-          command: mkdir -p test-results/extra
+          name: Prepare results folder
+          command: mkdir -p test-results/frontend-state
       - run:
-          name: Run Extra Test Suite
-          command: npm run test:extra
+          name: Run Frontend State Tests
+          command: npm run test:frontend-state
       - store_test_results:
           path: test-results
       - store_artifacts:
-          path: test-results/extra
-          destination: extra-reports
+          path: test-results/frontend-state
+          destination: frontend-state-reports
 
-  # Deploy Block
+  # -----------------------------------------------------------------
+  # Deploy Block: Executes only when all 4 test blocks pass
+  # -----------------------------------------------------------------
   deploy:
     executor: node-env
     steps:
@@ -113,30 +126,33 @@ jobs:
             echo "All 4 test suites passed successfully!"
             echo "Deploying application to production..."
 
+# -----------------------------------------------------------------
+# Workflow Graph Layout
+# -----------------------------------------------------------------
 workflows:
   version: 2
   build-test-and-deploy:
     jobs:
       - install-dependencies
 
-      # All 4 test blocks execute in parallel
-      - test-backend:
+      # All 4 test blocks execute simultaneously side-by-side
+      - test-backend-unit:
           requires:
             - install-dependencies
-      - test-frontend:
+      - test-backend-integration:
           requires:
             - install-dependencies
       - test-frontend-dom:
           requires:
             - install-dependencies
-      - test-extra:
+      - test-frontend-state:
           requires:
             - install-dependencies
 
-      # Deploy waits until all 4 test blocks are green
+      # Deployment executes strictly when all 4 test blocks turn green
       - deploy:
           requires:
-            - test-backend
-            - test-frontend
+            - test-backend-unit
+            - test-backend-integration
             - test-frontend-dom
-            - test-extra
+            - test-frontend-state
