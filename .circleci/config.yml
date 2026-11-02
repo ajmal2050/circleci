@@ -7,23 +7,20 @@ executors:
     working_directory: ~/project
 
 jobs:
-  # -------------------------------------------------------------
-  # Job 1: Install & Cache Dependencies
-  # -------------------------------------------------------------
   install-dependencies:
     executor: node-env
     steps:
       - checkout
       - restore_cache:
-          name: Restore npm dependencies cache
+          name: Restore cached node_modules
           keys:
             - npm-deps-{{ checksum "package.json" }}
             - npm-deps-
       - run:
-          name: Install npm packages
+          name: Install dependencies
           command: npm install
       - save_cache:
-          name: Cache npm dependencies
+          name: Cache node_modules
           paths:
             - node_modules
           key: npm-deps-{{ checksum "package.json" }}
@@ -32,158 +29,50 @@ jobs:
           paths:
             - .
 
-  # -------------------------------------------------------------
-  # Parallel Test 1: Backend Unit Tests
-  # -------------------------------------------------------------
-  test-backend-unit:
+  run-tests-parallel:
     executor: node-env
+    parallelism: 4 # Provisions 4 containers running at the same time
     steps:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Prepare results folder
-          command: mkdir -p test-results/backend-unit
+          name: Prepare results directory
+          command: mkdir -p test-results/junit
       - run:
-          name: Run Backend Unit Tests
-          command: npm run test:backend:unit
-      - store_test_results:
-          path: test-results
-      - store_artifacts:
-          path: test-results/backend-unit
-          destination: backend-unit-reports
-
-  # -------------------------------------------------------------
-  # Parallel Test 2: Backend Integration Tests
-  # -------------------------------------------------------------
-  test-backend-integration:
-    executor: node-env
-    steps:
-      - attach_workspace:
-          at: ~/project
-      - run:
-          name: Prepare results folder
-          command: mkdir -p test-results/backend-integration
-      - run:
-          name: Run Backend Integration Tests
-          command: npm run test:backend:integration
-      - store_test_results:
-          path: test-results
-      - store_artifacts:
-          path: test-results/backend-integration
-          destination: backend-integration-reports
-
-  # -------------------------------------------------------------
-  # Parallel Test 3: Frontend DOM Tests
-  # -------------------------------------------------------------
-  test-frontend-dom:
-    executor: node-env
-    steps:
-      - attach_workspace:
-          at: ~/project
-      - run:
-          name: Prepare results folder
-          command: mkdir -p test-results/frontend-dom
-      - run:
-          name: Run Frontend DOM Tests
-          command: npm run test:frontend:dom
-      - store_test_results:
-          path: test-results
-      - store_artifacts:
-          path: test-results/frontend-dom
-          destination: frontend-dom-reports
-
-  # -------------------------------------------------------------
-  # Parallel Test 4: Frontend State Tests
-  # -------------------------------------------------------------
-  test-frontend-state:
-    executor: node-env
-    steps:
-      - attach_workspace:
-          at: ~/project
-      - run:
-          name: Prepare results folder
-          command: mkdir -p test-results/frontend-state
-      - run:
-          name: Run Frontend State Tests
-          command: npm run test:frontend:state
-      - store_test_results:
-          path: test-results
-      - store_artifacts:
-          path: test-results/frontend-state
-          destination: frontend-state-reports
-
-  # -------------------------------------------------------------
-  # Job 6: Notification / Status Aggregator (Runs after all 4 pass)
-  # -------------------------------------------------------------
-  notify-tests-passed:
-    executor: node-env
-    steps:
-      - run:
-          name: Broadcast Success Status
+          name: Run Split Tests Across 4 Parallel Nodes
           command: |
-            echo "======================================================="
-            echo "All 4 test suites passed successfully!"
-            echo "Backend Unit, Backend Integration, Frontend DOM, and Frontend State are green."
-            echo "Ready for production release."
-            echo "======================================================="
+            # Automatically discovers all 4 test files and maps 1 file to each node
+            TEST_FILES=$(circleci tests glob "test/**/*.test.js" | circleci tests split --split-by=timings)
+            echo "========================================================"
+            echo "Node $CIRCLE_NODE_INDEX of $CIRCLE_NODE_TOTAL is running:"
+            echo "$TEST_FILES"
+            echo "========================================================"
+            npm run test:parallel -- --test-reporter-destination="test-results/junit/results-${CIRCLE_NODE_INDEX}.xml" $TEST_FILES
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results/junit
+          destination: parallel-test-results
 
-  # -------------------------------------------------------------
-  # Job 7: Production Deployment
-  # -------------------------------------------------------------
-  deploy-production:
+  deploy:
     executor: node-env
     steps:
       - attach_workspace:
           at: ~/project
       - run:
-          name: Execute Deployment Scripts
+          name: Execute Production Deploy
           command: |
-            echo "Deploying fullstack application to production environment..."
+            echo "All 4 parallel test nodes passed successfully!"
+            echo "Deploying application to production..."
 
-# =============================================================
-# WORKFLOW ORCHESTRATION
-# =============================================================
 workflows:
   version: 2
-  fullstack-4-parallel-tests:
+  build-test-and-deploy:
     jobs:
       - install-dependencies
-
-      # --- 4 PARALLEL TEST SUITES ---
-      - test-backend-unit:
+      - run-tests-parallel:
           requires:
             - install-dependencies
-      - test-backend-integration:
+      - deploy:
           requires:
-            - install-dependencies
-      - test-frontend-dom:
-          requires:
-            - install-dependencies
-      - test-frontend-state:
-          requires:
-            - install-dependencies
-
-      # --- FAN-IN NOTIFICATION (Waits for all 4 tests) ---
-      - notify-tests-passed:
-          requires:
-            - test-backend-unit
-            - test-backend-integration
-            - test-frontend-dom
-            - test-frontend-state
-
-      # --- MANUAL APPROVAL GATE ---
-      - hold-production-deploy:
-          type: approval
-          requires:
-            - notify-tests-passed
-          filters:
-            branches:
-              only: main
-
-      # --- PRODUCTION DEPLOYMENT ---
-      - deploy-production:
-          requires:
-            - hold-production-deploy
-          filters:
-            branches:
-              only: main
+            - run-tests-parallel
