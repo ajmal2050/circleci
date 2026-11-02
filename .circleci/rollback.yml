@@ -29,12 +29,8 @@ jobs:
       - run:
           name: Perform rollback
           command: |
-            echo "=== Rolling back to version: ${TARGET_VERSION} ==="
-            if [ -f release_metadata.env ]; then
-              source release_metadata.env
-            fi
             # TODO: add rollback logic using ${TARGET_VERSION}
-            echo "Rollback execution finished."
+            echo "Rolling back to version ${TARGET_VERSION}..."
       - run:
           name: Update deployment status to failed
           command: circleci run release update deploy-rollback --status=FAILED
@@ -58,10 +54,16 @@ jobs:
 workflows:
   rollback:
     jobs:
-      - deploy-rollback
+      - deploy-rollback:
+          filters:
+            branches:
+              only: main
       - deploy-rollback-release:
           requires:
             - deploy-rollback
+          filters:
+            branches:
+              only: main
       - cancel-deploy-rollback:
           requires:
             - deploy-rollback:
